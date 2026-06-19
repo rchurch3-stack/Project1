@@ -2,25 +2,380 @@
 title: "Project1"
 format: html
 editor: visual
+author: Ralph Church
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
 ```{r}
-1 + 1
+library(tidyverse)
+library(readxl)
+library(DBI)
+library(knitr)
+library(httr)
+library(jsonlite)
+library(psych)
+library(gt)
+
+
+parse_pums <- function(response) {
+
+  # Extract the API response as text
+  response_text <- content(response, "text")
+
+  # Convert the JSON response into an R object
+  parsed <- fromJSON(response_text)
+
+  # Remove the first row and convert the remaining data to a tibble
+  pums_data <- as_tibble(parsed[-1, ])
+
+  # Use the first row as the column names
+  colnames(pums_data) <- parsed[1, ]
+
+  # Return the cleaned tibble
+  pums_data
+}
+
+query_pums <- function(
+    year = 2022,
+    numeric_vars = c("AGEP", "PWGTP"),
+    categorical_vars = c("SEX"),
+    geography = "state",
+    subset_value = "37", # North Carolina by default
+    key
+) {
+
+  # --------------------------
+  # Validate year
+  # --------------------------
+
+  if (!is.numeric(year) || length(year) != 1) {
+    stop("year must be a single numeric value.")
+  }
+
+  if (!(year %in% 2010:2022)) {
+    stop("year must be between 2010 and 2022.")
+  }
+
+  # --------------------------
+  # Validate numeric variables
+  # --------------------------
+
+  valid_numeric <- c(
+    "AGEP",
+    "GASP",
+    "GRPIP",
+    "JWAP",
+    "JWDP",
+    "JWMNP",
+    "PWGTP"
+  )
+
+  if (!all(numeric_vars %in% valid_numeric)) {
+    stop("One or more numeric variables are invalid.")
+  }
+
+  # Ensure PWGTP is always returned
+  if (!("PWGTP" %in% numeric_vars)) {
+    numeric_vars <- c(numeric_vars, "PWGTP")
+  }
+
+  # Require at least one numeric variable besides PWGTP
+  if (length(setdiff(numeric_vars, "PWGTP")) < 1) {
+    stop("At least one numeric variable besides PWGTP must be selected.")
+  }
+
+  # --------------------------
+  # Validate categorical variables
+  # --------------------------
+
+  valid_categorical <- c(
+    "FER",
+    "HHL",
+    "SCH",
+    "SCHL",
+    "SEX"
+  )
+
+  if (!all(categorical_vars %in% valid_categorical)) {
+    stop("One or more categorical variables are invalid.")
+  }
+
+  if (length(categorical_vars) < 1) {
+    stop("At least one categorical variable must be selected.")
+  }
+
+  # --------------------------
+  # Validate geography
+  # --------------------------
+
+  geography <- tolower(geography)
+
+  valid_geography <- c(
+    "region",
+    "division",
+    "state"
+  )
+
+  if (!(geography %in% valid_geography)) {
+    stop("geography must be region, division, or state.")
+  }
+
+  # --------------------------
+  # Build variable list
+  # --------------------------
+
+  variables <- unique(
+    c(
+      numeric_vars,
+      categorical_vars
+    )
+  )
+
+  variable_string <- paste(
+    variables,
+    collapse = ","
+  )
+
+  # --------------------------
+  # Geography filter
+  # --------------------------
+
+  if (tolower(subset_value) == "all") {
+
+    geography_clause <- paste0(
+      "&for=",
+      geography,
+      ":*"
+    )
+
+  } else {
+
+    geography_clause <- paste0(
+      "&for=",
+      geography,
+      ":",
+      subset_value
+    )
+  }
+
+  # --------------------------
+  # Build URL
+  # --------------------------
+
+  url <- paste0(
+    "https://api.census.gov/data/",
+    year,
+    "/acs/acs1/pums?",
+    "get=",
+    variable_string,
+    geography_clause,
+    "&key=",
+    key
+  )
+
+  # --------------------------
+  # Query API
+  # --------------------------
+
+  response <- GET(url)
+
+  # --------------------------
+  # Convert to tibble
+  # --------------------------
+  
+  # Convert response to tibble
+  data <- parse_pums(response)
+  
+  numeric_columns <- intersect(
+  names(data),
+  c(
+    "AGEP",
+    "GASP",
+    "GRPIP",
+    "JWAP",
+    "JWDP",
+    "JWMNP",
+    "PWGTP"
+  )
+)
+
+data <- data |>
+  mutate(
+    across(
+      all_of(numeric_columns),
+      as.numeric
+    )
+  )
+
+factor_columns <- intersect(
+  names(data),
+  c(
+    "FER",
+    "HHL",
+    "SCH",
+    "SCHL",
+    "SEX"
+  )
+)
+
+data <- data |>
+  mutate(
+    across(
+      all_of(factor_columns),
+      as.factor
+    )
+  )
+
+  # Add custom census class
+  class(data) <- c("census", class(data))
+
+  return(data)
+}
 ```
 
-You can add options to executable code like this
-
+Helper function is then used to turn the response into a tibble.
 ```{r}
-#| echo: false
-2 * 2
+url <-"https://api.census.gov/data/2024/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24&key=c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+
+response <- GET(url)
+
+status_code(response)
+
+response_text <- content(response, "text")
+
+
+pums_data <- parse_pums(response)
+
+pums_data
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+Test 1: the defaults:
+
+```{r}
+query_pums(
+  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+)
+```
+
+Test 2: Different year and variables:
+
+```{r}
+query_pums(
+  year = 2018,
+  numeric_vars = c("AGEP", "GRPIP"),
+  categorical_vars = c("SEX", "SCHL"),
+  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+)
+```
+
+Test 3: PWGTP automatically included:
+
+```{r}
+query_pums(
+  numeric_vars = c("AGEP"),
+  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+)
+```
+
+Next, we write a method capable of calling our single year function as many times as needed:
+
+```{r}
+query_pums_years <- function(
+    years,
+    numeric_vars = c("AGEP", "PWGTP"),
+    categorical_vars = c("SEX"),
+    geography = "state",
+    subset_value = "37",
+    key
+) {
+
+  # Remove 2020
+  if (2020 %in% years) {
+    stop("2020 is not allowed because Census discarded that data.")
+  }
+
+  results <- lapply(
+    years,
+    function(y) {
+
+      query_pums(
+        year = y,
+        numeric_vars = numeric_vars,
+        categorical_vars = categorical_vars,
+        geography = geography,
+        subset_value = subset_value,
+        key = key
+      ) |>
+        mutate(year = y)
+
+    }
+  )
+
+  bind_rows(results)
+
+}
+```
+
+Now, we make a call in order to test the multi-year function:
+
+```{r}
+query_pums_years(
+  years = c(2018, 2019, 2021, 2022),
+  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+)
+```
+
+We now check the class of our object to ensure it has the correct properties:
+
+```{r}
+my_data <- query_pums(key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af")
+
+class(my_data)
+```
+
+After querying the Census API, we assign the returned tibble an additional class of "census". This allows us to create custom methods later in the project, such as specialized summary or plotting functions that are automatically used whenever a census object is supplied.
+
+We'd like to now build a custom method for "census" that will return the mean and sd for numerics and return the counts for each of the categorical variables (factors).
+
+```{r}
+summary.census <- function(object, ...) {
+
+  # Find numeric variables
+  numeric_vars <- names(object)[sapply(object, is.numeric)]
+
+  # Find factor variables
+  factor_vars <- names(object)[sapply(object, is.factor)]
+
+  cat("Numeric Variables\n")
+  print(
+    object |>
+      summarize(
+        across(
+          all_of(numeric_vars),
+          list(
+            mean = ~mean(.x, na.rm = TRUE),
+            sd = ~sd(.x, na.rm = TRUE)
+          )
+        )
+      )
+  )
+
+  cat("\nCategorical Variables\n")
+
+  for (var in factor_vars) {
+
+    cat("\n", var, "\n")
+
+    print(
+      table(object[[var]])
+    )
+
+  }
+
+}
+
+my_data <- query_pums(key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af")
+
+str(my_data)
+summary(my_data) # will now automatically call summary.census() since first class is "census" printed out previously using class()
+```
+
