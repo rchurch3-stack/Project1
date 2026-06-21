@@ -6,6 +6,10 @@ author: Ralph Church
 ---
 
 ```{r}
+ # --------------------------
+  # imports
+  # --------------------------
+
 library(tidyverse)
 library(readxl)
 library(DBI)
@@ -14,7 +18,31 @@ library(httr)
 library(jsonlite)
 library(psych)
 library(gt)
+```
 
+
+```{r}
+ # --------------------------
+  # Helper methods
+  # --------------------------
+
+recode_factors <- function(data) {
+
+  if ("SEX" %in% names(data)) {
+    data$SEX <- factor(
+      data$SEX,
+      levels = c("1", "2"),
+      labels = c("Male", "Female")
+    )
+  }
+
+  data
+}
+
+```
+
+
+```{r}
 
 parse_pums <- function(response) {
 
@@ -225,6 +253,9 @@ data <- data |>
     )
   )
 
+  # make the SEX variable more readable by assigning Male and Female instead of 1 and 2
+  data <- recode_factors(data)
+
   # Add custom census class
   class(data) <- c("census", class(data))
 
@@ -337,13 +368,33 @@ After querying the Census API, we assign the returned tibble an additional class
 We'd like to now build a custom method for "census" that will return the mean and sd for numerics and return the counts for each of the categorical variables (factors).
 
 ```{r}
-summary.census <- function(object, ...) {
+summary.census <- function(
+    object,
+    numeric_vars = NULL,
+    categorical_vars = NULL,
+    ...
+) {
 
-  # Find numeric variables
-  numeric_vars <- names(object)[sapply(object, is.numeric)]
+  # If user doesn't specify numeric variables,
+  # summarize all numeric variables except PWGTP
+  if (is.null(numeric_vars)) {
 
-  # Find factor variables
-  factor_vars <- names(object)[sapply(object, is.factor)]
+    numeric_vars <- names(object)[sapply(object, is.numeric)]
+
+    numeric_vars <- setdiff(
+      numeric_vars,
+      "PWGTP"
+    )
+
+  }
+
+  # If user doesn't specify categorical variables,
+  # summarize all factor variables
+  if (is.null(categorical_vars)) {
+
+    categorical_vars <- names(object)[sapply(object, is.factor)]
+
+  }
 
   cat("Numeric Variables\n")
   print(
@@ -361,7 +412,7 @@ summary.census <- function(object, ...) {
 
   cat("\nCategorical Variables\n")
 
-  for (var in factor_vars) {
+  for (var in categorical_vars) {
 
     cat("\n", var, "\n")
 
