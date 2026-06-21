@@ -375,52 +375,61 @@ summary.census <- function(
     ...
 ) {
 
-  # If user doesn't specify numeric variables,
-  # summarize all numeric variables except PWGTP
   if (is.null(numeric_vars)) {
 
     numeric_vars <- names(object)[sapply(object, is.numeric)]
 
+    #Exclude also the time values such as JWAP and JWDP
     numeric_vars <- setdiff(
       numeric_vars,
-      "PWGTP"
+      c(
+        "PWGTP",
+        "year",
+        "JWAP",
+        "JWDP"
+      )
     )
 
   }
 
-  # If user doesn't specify categorical variables,
-  # summarize all factor variables
   if (is.null(categorical_vars)) {
 
     categorical_vars <- names(object)[sapply(object, is.factor)]
 
   }
 
-  cat("Numeric Variables\n")
-  print(
-    object |>
-      summarize(
-        across(
-          all_of(numeric_vars),
-          list(
-            mean = ~mean(.x, na.rm = TRUE),
-            sd = ~sd(.x, na.rm = TRUE)
-          )
-        )
-      )
-  )
+  results <- list()
 
-  cat("\nCategorical Variables\n")
+  # Weighted summaries
+  for (var in numeric_vars) {
 
-  for (var in categorical_vars) {
+    x <- object[[var]]
+    w <- object$PWGTP
 
-    cat("\n", var, "\n")
+    weighted_mean <- sum(x * w) / sum(w)
 
-    print(
-      table(object[[var]])
+    weighted_sd <- sqrt(
+      sum(x^2 * w) / sum(w) -
+      weighted_mean^2
+    )
+
+    results[[var]] <- list(
+      mean = weighted_mean,
+      sd = weighted_sd
     )
 
   }
+
+  # Categorical counts
+  for (var in categorical_vars) {
+
+    results[[var]] <- table(
+      object[[var]]
+    )
+
+  }
+
+  return(results)
 
 }
 
