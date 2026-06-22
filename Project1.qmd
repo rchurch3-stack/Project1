@@ -20,6 +20,12 @@ library(psych)
 library(gt)
 ```
 
+```{r}
+# Global variable census_key
+
+census_key <- "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+```
+
 
 ```{r}
  # --------------------------
@@ -37,6 +43,18 @@ recode_factors <- function(data) {
   }
 
   data
+}
+
+# Census encodes JWAP/JWDP as time intervals.
+# These are converted to time values and are not
+# included in summary.census().
+convert_time_variable <- function(x) {
+
+  x <- as.numeric(x)
+
+  x[x == 0] <- NA
+
+  x
 }
 
 ```
@@ -263,27 +281,12 @@ data <- data |>
 }
 ```
 
-Helper function is then used to turn the response into a tibble.
-```{r}
-url <-"https://api.census.gov/data/2024/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24&key=c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
-
-response <- GET(url)
-
-status_code(response)
-
-response_text <- content(response, "text")
-
-
-pums_data <- parse_pums(response)
-
-pums_data
-```
 
 Test 1: the defaults:
 
 ```{r}
 query_pums(
-  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+  key = census_key
 )
 ```
 
@@ -294,7 +297,7 @@ query_pums(
   year = 2018,
   numeric_vars = c("AGEP", "GRPIP"),
   categorical_vars = c("SEX", "SCHL"),
-  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+  key = census_key
 )
 ```
 
@@ -303,7 +306,7 @@ Test 3: PWGTP automatically included:
 ```{r}
 query_pums(
   numeric_vars = c("AGEP"),
-  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+  key = census_key
 )
 ```
 
@@ -351,14 +354,14 @@ Now, we make a call in order to test the multi-year function:
 ```{r}
 query_pums_years(
   years = c(2018, 2019, 2021, 2022),
-  key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
+  key = census_key
 )
 ```
 
 We now check the class of our object to ensure it has the correct properties:
 
 ```{r}
-my_data <- query_pums(key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af")
+my_data <- query_pums(key = census_key)
 
 class(my_data)
 ```
@@ -433,7 +436,7 @@ summary.census <- function(
 
 }
 
-my_data <- query_pums(key = "c3bbdb3ef53632db1e5b607b6e5b021cff9111af")
+my_data <- query_pums(key = census_key)
 
 str(my_data)
 summary(my_data) # will now automatically call summary.census() since first class is "census" printed out previously using class()
