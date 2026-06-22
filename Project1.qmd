@@ -76,12 +76,37 @@ convert_time_variable <- function(x, lookup) {
 
   x <- as.numeric(x)
 
-  x[x == "0"] <- NA
+  x[x == 0] <- NA
 
   result <- lookup[x]
 
-  unname(result)
+  result <- sapply(
+    result,
+    function(interval) {
 
+      if (is.na(interval)) {
+        return(NA_character_)
+      }
+
+      start_time <- strsplit(interval, " to ")[[1]][1]
+
+      start_time <- gsub("\\.", "", start_time)
+
+      start <- strptime(
+        start_time,
+        format = "%I:%M %p"
+      )
+
+      midpoint <- start + 120
+
+      format(
+        midpoint,
+        "%I:%M %p"
+      )
+    }
+  )
+
+  unname(result)
 }
 
 ```
@@ -308,10 +333,6 @@ query_pums <- function(
   # Convert response to tibble
   data <- parse_pums(response)
   
-  print(head(data$JWAP, 20))
-  
-  head(data$JWAP)
-  
   numeric_columns <- intersect(
   names(data),
   c(
@@ -330,15 +351,6 @@ data <- data |>
       as.numeric
     )
   )
-
-head(data$JWAP)
-
-head(
-  convert_time_variable(
-    data$JWAP,
-    jwap_lookup
-  )
-)
 
 # Convert JWAP if requested
 if ("JWAP" %in% names(data)) {
@@ -380,8 +392,6 @@ data <- data |>
 
   # Add custom census class
   class(data) <- c("census", class(data))
-  
-  str(data$JWAP)
 
   return(data)
 }
@@ -420,13 +430,18 @@ query_pums(
 Test 4: Testing whether or not the time value conversions are showing correctly:
 
 ```{r}
-query_pums(
+test_jwap <- query_pums(
   numeric_vars = c("JWAP"),
   key = census_key
 ) |>
-  pull(JWAP) |>
-  head(20)
+  pull(JWAP)
+
+str(test_jwap)
+
+head(test_jwap, 20)
 ```
+
+The Census API stores JWAP and JWDP as coded time intervals rather than actual clock times. The helper function uses the lookup table to convert each code into its corresponding time interval and then returns the midpoint of that interval. For example, the interval "3:15 p.m. to 3:19 p.m." is represented as "03:17 PM". Missing values (coded as 0) are converted to NA.
 
 ### Combining Multiple Years
 
