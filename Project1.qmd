@@ -5,19 +5,18 @@ editor: visual
 author: Ralph Church
 ---
 
+### Introduction
+
+The goal of this project is to build reusable functions that interact with the Census Public Use Microdata Sample (PUMS) API. Rather than manually constructing API requests each time, I developed functions that validate user inputs, retrieve data from the API, convert the returned JSON into a tidy tibble, and apply appropriate data types. I also created custom summary and plotting methods for census data objects so that common analyses can be performed consistently across multiple datasets.
+
 ```{r}
  # --------------------------
   # imports
   # --------------------------
 
 library(tidyverse)
-library(readxl)
-library(DBI)
-library(knitr)
 library(httr)
 library(jsonlite)
-library(psych)
-library(gt)
 ```
 
 ```{r}
@@ -26,6 +25,9 @@ library(gt)
 census_key <- "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
 ```
 
+### Helper Functions
+
+The Census API returns data in JSON format. To make the data easier to work with in R, I first created helper functions that convert API responses into tibbles and recode categorical variables into more meaningful labels.
 
 ```{r}
  # --------------------------
@@ -39,6 +41,19 @@ recode_factors <- function(data) {
       data$SEX,
       levels = c("1", "2"),
       labels = c("Male", "Female")
+    )
+  }
+  
+  if ("SCH" %in% names(data)) {
+    data$SCH <- factor(
+      data$SCH,
+      levels = c("0", "1", "2", "3"),
+      labels = c(
+        "Under 3",
+        "Not Enrolled",
+        "Public School",
+        "Private/Home School"
+      )
     )
   }
 
@@ -59,9 +74,9 @@ convert_time_variable <- function(x) {
 
 ```
 
+The parse_pums() function extracts the JSON response, converts it into an R object, and transforms the returned data into a tidy tibble with appropriate column names.
 
 ```{r}
-
 parse_pums <- function(response) {
 
   # Extract the API response as text
@@ -79,7 +94,13 @@ parse_pums <- function(response) {
   # Return the cleaned tibble
   pums_data
 }
+```
 
+### Querying the Census API
+
+The primary function developed for this project is query_pums(). This function allows a user to specify a survey year, numeric variables, categorical variables, geography level, and geographic subset. Input validation is performed to ensure that only supported years and variables are requested. The function also guarantees that the survey weight variable (PWGTP) is always included.
+
+```{r}
 query_pums <- function(
     year = 2022,
     numeric_vars = c("AGEP", "PWGTP"),
@@ -281,6 +302,7 @@ data <- data |>
 }
 ```
 
+The following examples demonstrate that the function successfully retrieves data using default parameters, custom variable selections, and automatic inclusion of the required weight variable.
 
 Test 1: the defaults:
 
@@ -310,7 +332,9 @@ query_pums(
 )
 ```
 
-Next, we write a method capable of calling our single year function as many times as needed:
+### Combining Multiple Years
+
+Because many analyses require multiple years of data, I created a wrapper function that repeatedly calls query_pums() and combines the results into a single tibble. The function excludes the year 2020 because the Census Bureau advises against using those data due to disruptions caused by the COVID-19 pandemic.
 
 ```{r}
 query_pums_years <- function(
@@ -318,7 +342,7 @@ query_pums_years <- function(
     numeric_vars = c("AGEP", "PWGTP"),
     categorical_vars = c("SEX"),
     geography = "state",
-    subset_value = "37",
+    subset_value = "37", # North Carolina by default
     key
 ) {
 
@@ -366,9 +390,11 @@ my_data <- query_pums(key = census_key)
 class(my_data)
 ```
 
-After querying the Census API, we assign the returned tibble an additional class of "census". This allows us to create custom methods later in the project, such as specialized summary or plotting functions that are automatically used whenever a census object is supplied.
+### Custom Census Class
 
-We'd like to now build a custom method for "census" that will return the mean and sd for numerics and return the counts for each of the categorical variables (factors).
+To support custom methods, the returned tibble is assigned an additional class called "census". This allows generic functions such as summary() and plot() to automatically use methods specifically designed for census data.
+
+A custom summary method was created for census objects. Numeric variables are summarized using weighted means and weighted standard deviations based on the Census survey weight (PWGTP). Categorical variables are summarized using frequency counts. By default, all eligible variables are summarized, although the user may specify a subset of variables if desired.
 
 ```{r}
 summary.census <- function(
@@ -382,7 +408,10 @@ summary.census <- function(
 
     numeric_vars <- names(object)[sapply(object, is.numeric)]
 
-    #Exclude also the time values such as JWAP and JWDP
+    # JWAP and JWDP are Census-coded time intervals.
+    # These variables are excluded from summary statistics
+    # because the project instructions allow time variables
+    # to be skipped.
     numeric_vars <- setdiff(
       numeric_vars,
       c(
@@ -409,11 +438,14 @@ summary.census <- function(
     x <- object[[var]]
     w <- object$PWGTP
 
-    weighted_mean <- sum(x * w) / sum(w)
-
+    # Handle missing values if any occur.
+    weighted_mean <- sum(x * w, na.rm = TRUE) /
+      sum(w[!is.na(x)])
+    
     weighted_sd <- sqrt(
-      sum(x^2 * w) / sum(w) -
-      weighted_mean^2
+      sum(x^2 * w, na.rm = TRUE) /
+        sum(w[!is.na(x)]) -
+        weighted_mean^2
     )
 
     results[[var]] <- list(
@@ -442,3 +474,92 @@ str(my_data)
 summary(my_data) # will now automatically call summary.census() since first class is "census" printed out previously using class()
 ```
 
+The results show weighted summary statistics for numeric variables and frequency distributions for categorical variables, providing a quick overview of the returned data.
+
+### Census Plot Method
+
+A custom plotting method was also developed for census objects. The user specifies a categorical variable and a numeric variable, and the function produces a weighted boxplot using the Census survey weights. This provides a simple way to compare distributions across demographic groups.
+
+```{r}
+plot.census <- function(
+    x,
+    cat_var,
+    num_var,
+    ...
+) {
+
+  ggplot(
+    x,
+    aes(
+      x = get(cat_var),
+      y = get(num_var),
+      weight = PWGTP
+    )
+  ) +
+    geom_boxplot() +
+    labs(
+      x = cat_var,
+      y = num_var,
+      title = paste(
+        num_var,
+        "by",
+        cat_var
+      )
+    )
+
+}
+```
+
+The boxplot below compares age distributions between males and females in North Carolina using survey-weighted observations.
+
+```{r}
+plot(
+  my_data,
+  cat_var = "SEX",
+  num_var = "AGEP"
+)
+```
+
+The second example demonstrates that the plotting function can be reused with different variables without modification.
+
+```{r}
+plot(
+  query_pums(
+    numeric_vars = c("GRPIP"),
+    categorical_vars = c("SEX"),
+    key = census_key
+  ),
+  cat_var = "SEX",
+  num_var = "GRPIP"
+)
+```
+
+GRPIP (Gross Rent as a Percentage of Household Income) is heavily right-skewed as is shown in the figure above.
+
+### Exploring the Data
+
+Example: Age and School Enrollment
+
+To demonstrate the functions developed in this project, I explored the relationship between age (AGEP) and school enrollment status (SCH). The results show that people currently attending school are generally younger than those who are not enrolled. This example illustrates how the API query, summary, and plotting functions can be combined to quickly investigate patterns in Census data.
+
+```{r}
+edu_data <- query_pums(
+  numeric_vars = c("AGEP"),
+  categorical_vars = c("SCH"),
+  key = census_key
+)
+
+summary(
+  edu_data,
+  numeric_vars = "AGEP",
+  categorical_vars = "SCH"
+)
+
+plot(
+  edu_data,
+  cat_var = "SCH",
+  num_var = "AGEP"
+)
+```
+
+People who are currently enrolled in school tend to be younger, while people who are not enrolled tend to be older. This is exactly what we would expect and provides a good example of how the custom summary and plotting functions can be used to explore Census data.
