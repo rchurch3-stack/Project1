@@ -20,19 +20,28 @@ library(jsonlite)
 ```
 
 ```{r}
-# Global variable census_key
+# Global variables
 
 census_key <- "c3bbdb3ef53632db1e5b607b6e5b021cff9111af"
 ```
 
 ### Helper Functions
 
-The Census API returns data in JSON format. To make the data easier to work with in R, I first created helper functions that convert API responses into tibbles and recode categorical variables into more meaningful labels.
+The Census API returns data in JSON format. To make the data easier to work with in R, I first created helper functions that convert API responses into tibbles and recode categorical variables into more meaningful labels. Also a method to read locally kept json files for the time variable look ups.
 
 ```{r}
  # --------------------------
   # Helper methods
   # --------------------------
+
+load_time_lookup <- function(file_name) {
+
+  data <- unlist(
+    jsonlite::fromJSON(file_name)$values$item
+  )
+
+  data
+}
 
 recode_factors <- function(data) {
 
@@ -63,16 +72,63 @@ recode_factors <- function(data) {
 # Census encodes JWAP/JWDP as time intervals.
 # These are converted to time values and are not
 # included in summary.census().
-convert_time_variable <- function(x) {
+convert_time_variable <- function(x, lookup) {
 
   x <- as.numeric(x)
 
-  x[x == 0] <- NA
+  x[x == "0"] <- NA
 
-  x
+  result <- lookup[x]
+
+  unname(result)
+
 }
 
 ```
+First, we load the time variable json files in order to more easily convert:
+
+```{r}
+jwap_lookup <- load_time_lookup("JWAP.json")
+class(jwap_lookup)
+
+str(jwap_lookup)
+jwdp_lookup <- load_time_lookup("JWDP.json")
+```
+
+### Testing Time Variable Conversion
+
+```{r}
+# Test that a known code maps correctly
+convert_time_variable(
+  c("109"),
+  c("109" = "9:17 AM")
+)
+
+# Expected:
+# "9:17 AM"
+
+test_times <- c(
+  "058",
+  "109",
+  "122",
+  "0"
+)
+
+convert_time_variable(
+  test_times,
+  c(
+    "058" = "5:02 AM",
+    "109" = "9:17 AM",
+    "122" = "10:22 AM"
+  )
+)
+```
+Expected:
+
+5:02 AM
+9:17 AM
+10:22 AM
+NA
 
 The parse_pums() function extracts the JSON response, converts it into an R object, and transforms the returned data into a tidy tibble with appropriate column names.
 
@@ -252,14 +308,16 @@ query_pums <- function(
   # Convert response to tibble
   data <- parse_pums(response)
   
+  print(head(data$JWAP, 20))
+  
+  head(data$JWAP)
+  
   numeric_columns <- intersect(
   names(data),
   c(
     "AGEP",
     "GASP",
     "GRPIP",
-    "JWAP",
-    "JWDP",
     "JWMNP",
     "PWGTP"
   )
@@ -272,6 +330,31 @@ data <- data |>
       as.numeric
     )
   )
+
+head(data$JWAP)
+
+head(
+  convert_time_variable(
+    data$JWAP,
+    jwap_lookup
+  )
+)
+
+# Convert JWAP if requested
+if ("JWAP" %in% names(data)) {
+  data$JWAP <- convert_time_variable(
+    data$JWAP,
+    jwap_lookup
+  )
+}
+
+# Convert JWDP if requested
+if ("JWDP" %in% names(data)) {
+  data$JWDP <- convert_time_variable(
+    data$JWDP,
+    jwdp_lookup
+  )
+}
 
 factor_columns <- intersect(
   names(data),
@@ -297,6 +380,8 @@ data <- data |>
 
   # Add custom census class
   class(data) <- c("census", class(data))
+  
+  str(data$JWAP)
 
   return(data)
 }
@@ -330,6 +415,17 @@ query_pums(
   numeric_vars = c("AGEP"),
   key = census_key
 )
+```
+
+Test 4: Testing whether or not the time value conversions are showing correctly:
+
+```{r}
+query_pums(
+  numeric_vars = c("JWAP"),
+  key = census_key
+) |>
+  pull(JWAP) |>
+  head(20)
 ```
 
 ### Combining Multiple Years
