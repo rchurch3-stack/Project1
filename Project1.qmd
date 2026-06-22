@@ -120,41 +120,6 @@ str(jwap_lookup)
 jwdp_lookup <- load_time_lookup("JWDP.json")
 ```
 
-### Testing Time Variable Conversion
-
-```{r}
-# Test that a known code maps correctly
-convert_time_variable(
-  c("109"),
-  c("109" = "9:17 AM")
-)
-
-# Expected:
-# "9:17 AM"
-
-test_times <- c(
-  "058",
-  "109",
-  "122",
-  "0"
-)
-
-convert_time_variable(
-  test_times,
-  c(
-    "058" = "5:02 AM",
-    "109" = "9:17 AM",
-    "122" = "10:22 AM"
-  )
-)
-```
-Expected:
-
-5:02 AM
-9:17 AM
-10:22 AM
-NA
-
 The parse_pums() function extracts the JSON response, converts it into an R object, and transforms the returned data into a tidy tibble with appropriate column names.
 
 ```{r}
