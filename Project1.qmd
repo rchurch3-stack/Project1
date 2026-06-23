@@ -52,7 +52,7 @@ recode_factors <- function(data) {
       labels = c("Male", "Female")
     )
   }
-  
+
   if ("SCH" %in% names(data)) {
     data$SCH <- factor(
       data$SCH,
@@ -62,6 +62,71 @@ recode_factors <- function(data) {
         "Not Enrolled",
         "Public School",
         "Private/Home School"
+      )
+    )
+  }
+
+  if ("FER" %in% names(data)) {
+    data$FER <- factor(
+      data$FER,
+      levels = c("0", "1", "2"),
+      labels = c(
+        "Not Applicable",
+        "Yes",
+        "No"
+      )
+    )
+  }
+
+  if ("HHL" %in% names(data)) {
+    data$HHL <- factor(
+      data$HHL,
+      levels = c("0", "1", "2", "3", "4", "5"),
+      labels = c(
+        "Not Applicable",
+        "English Only",
+        "Spanish",
+        "Other Indo-European",
+        "Asian/Pacific Island",
+        "Other Language"
+      )
+    )
+  }
+
+  if ("SCHL" %in% names(data)) {
+    data$SCHL <- factor(
+      data$SCHL,
+      levels = c(
+        "0","01","02","03","04","05","06","07","08","09",
+        "10","11","12","13","14","15","16","17","18","19",
+        "20","21","22","23","24"
+      ),
+      labels = c(
+        "Under 3",
+        "No Schooling",
+        "Preschool",
+        "Kindergarten",
+        "Grade 1",
+        "Grade 2",
+        "Grade 3",
+        "Grade 4",
+        "Grade 5",
+        "Grade 6",
+        "Grade 7",
+        "Grade 8",
+        "Grade 9",
+        "Grade 10",
+        "Grade 11",
+        "12th No Diploma",
+        "High School Diploma",
+        "GED",
+        "Some College <1 Year",
+        "College Credit No Degree",
+        "Associate Degree",
+        "Bachelor Degree",
+        "Master Degree",
+        "Professional Degree",
+        "Doctorate Degree"
       )
     )
   }
@@ -231,6 +296,18 @@ query_pums <- function(
   if (!(geography %in% valid_geography)) {
     stop("geography must be region, division, or state.")
   }
+  
+  if (geography == "region" &&
+    subset_value != "all" &&
+    !(subset_value %in% c("1", "2", "3", "4"))) {
+    stop("Region must be 1, 2, 3, or 4.")
+  }
+  
+  if (geography == "division" &&
+      subset_value != "all" &&
+      !(subset_value %in% as.character(1:9))) {
+    stop("Division must be between 1 and 9.")
+  }
 
   # --------------------------
   # Build variable list
@@ -252,23 +329,12 @@ query_pums <- function(
   # Geography filter
   # --------------------------
 
-  if (tolower(subset_value) == "all") {
-
-    geography_clause <- paste0(
-      "&for=",
-      geography,
-      ":*"
-    )
-
-  } else {
-
-    geography_clause <- paste0(
-      "&for=",
-      geography,
-      ":",
-      subset_value
-    )
-  }
+  geography_clause <- paste0(
+    "&for=",
+    geography,
+    ":",
+    subset_value
+  )
 
   # --------------------------
   # Build URL
@@ -364,6 +430,8 @@ data <- data |>
 
 The following examples demonstrate that the function successfully retrieves data using default parameters, custom variable selections, and automatic inclusion of the required weight variable.
 
+### Unit Tests
+
 Test 1: the defaults:
 
 ```{r}
@@ -392,7 +460,7 @@ query_pums(
 )
 ```
 
-Test 4: Testing whether or not the time value conversions are showing correctly:
+Test 4: Querying with JWAP:
 
 ```{r}
 test_jwap <- query_pums(
@@ -406,7 +474,69 @@ str(test_jwap)
 head(test_jwap, 20)
 ```
 
-The Census API stores JWAP and JWDP as coded time intervals rather than actual clock times. The helper function uses the lookup table to convert each code into its corresponding time interval and then returns the midpoint of that interval. For example, the interval "3:15 p.m. to 3:19 p.m." is represented as "03:17 PM". Missing values (coded as 0) are converted to NA.
+The Census API stores **JWAP** and **JWDP** as coded time intervals rather than actual clock times. The helper function uses the lookup table to convert each code into its corresponding time interval and then returns the midpoint of that interval. For example, the interval "3:15 p.m. to 3:19 p.m." is represented as "03:17 PM". Missing values (coded as 0) are converted to NA.
+
+Test 5 Querying with JWDP: 
+
+```{r}
+query_pums(
+  numeric_vars = c("JWDP"),
+  key = census_key
+) |>
+  pull(JWDP) |>
+  head(10)
+```
+
+
+Test 6: FER recoding:
+
+```{r}
+query_pums(
+  categorical_vars = c("FER"),
+  key = census_key
+) |>
+  count(FER)
+```
+
+Test 7: HHL Recoding:
+
+```{r}
+query_pums(
+  categorical_vars = c("HHL"),
+  key = census_key
+) |>
+  count(HHL)
+```
+
+Test 8: SCHL Recoding:
+
+```{r}
+query_pums(
+  categorical_vars = c("SCHL"),
+  key = census_key
+) |>
+  count(SCHL)
+```
+
+Test 9: Querying the region:
+
+```{r}
+query_pums(
+  geography = "region",
+  subset_value = "3", # Region 3 = South
+  key = census_key
+)
+```
+
+Test 10: Querying Division:
+
+```{r}
+query_pums(
+  geography = "division",
+  subset_value = "5", # Division 5 = South Atlantic
+  key = census_key
+)
+```
 
 ### Combining Multiple Years
 
